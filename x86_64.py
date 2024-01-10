@@ -24,7 +24,7 @@ def on_instruction(instruction, runtime_address, user_data):
         operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER and
         operands[0].reg.value == ZYDIS_REGISTER_RDX):
 
-        DWORD64 target = operands[1].mem.disp.value + runtime_address - data.buffer_info().buf
+        target = operands[1].mem.disp.value + runtime_address - data.buffer_info().buf
         if target == bRemoteConnAllowed_addr: current = &bRemoteConnAllowed_addr;
         else if (target == bFUSEnabled_addr) current = &bFUSEnabled_addr;
         else if (target == bAppServerAllowed_addr) current = &bAppServerAllowed_addr;
