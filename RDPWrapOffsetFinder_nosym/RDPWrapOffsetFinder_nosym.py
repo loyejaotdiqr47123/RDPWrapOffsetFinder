@@ -1,4 +1,5 @@
 import pefile
+from capstone import *
 
 def find_section_by_name(pe_file_path, section_name):
     # 将节名称转换为小写，以进行不区分区域设置的比较
@@ -34,3 +35,16 @@ def find_pattern_in_pe(pe_file, pattern):
         # 如果没有找到匹配的字节模式，返回-1
     
     return -1
+
+def find_lea_instruction(target_address, function_code):
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+    md.detail = True
+
+    for insn in md.disasm(function_code, 0):
+        if insn.mnemonic == 'lea':
+            for op in insn.operands:
+                if op.type == X86_OP_MEM:
+                    if op.mem.disp == target_address:
+                        return insn
+
+    return None
