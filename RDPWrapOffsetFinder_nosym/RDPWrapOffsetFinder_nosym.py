@@ -1,5 +1,12 @@
 import pefile
 from capstone import *
+import ctypes
+from ctypes import wintypes
+
+DONT_RESOLVE_DLL_REFERENCES = 0x00000001
+LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800
+
+kernel32 = ctypes.windll.kernel32
 
 Query = "CDefPolicy::Query"
 LocalOnly = "CSLQuery::IsTerminalTypeLocalOnly"
@@ -13,13 +20,16 @@ AllowMultimon = u"TerminalServices-RemoteConnectionManager-AllowMultimon"
 MaxUserSessions = u"TerminalServices-RemoteConnectionManager-MaxUserSessions"
 MaxDebugSessions = u"TerminalServices-RemoteConnectionManager-ce0ad219-4670-4988-98fb-89b14c2f072b-MaxSessions"
 
-def find_section(pe, section_name):
+def LoadLibraryEx(libname, handle, flags):
+    return kernel32.LoadLibraryExW(libname, handle, flags)
+
+def findSection(pe, section_name):
     for section in pe.sections:
         if section.Name.decode().strip('\x00') == section_name:
             return section
     return None
 
-def pattern_match(pe, section_name, pattern):
+def pattenMatch(pe, section_name, pattern):
     section = next((s for s in pe.sections if s.Name.rstrip(b'\x00').decode() == section_name), None)
     if not section:
         return -1
@@ -286,3 +296,40 @@ def single_user_patch(pe_path, rva, base, target, target2):
                             break
         IP += instr.size
     return 0
+
+def main(argv):
+    if len(argv) >= 2:
+        hMod = LoadLibraryEx(argv[1], None, DONT_RESOLVE_DLL_REFERENCES)
+    else:
+        hMod = LoadLibraryEx("termsrv.dll", None, DONT_RESOLVE_DLL_REFERENCES | LOAD_LIBRARY_SEARCH_SYSTEM32)
+    
+    if not hMod:
+        return -1
+
+    base = hMod
+    pDos = ctypes.POINTER(ctypes.c_uint16).from_address(base)
+    pNT = ctypes.POINTER(ctypes.c_uint32).from_address(base + pDos.contents.e_lfanew)
+    rdata = findSection(pNT, b".rdata")
+    if not rdata:
+        rdata = findSection(pNT, b".text")
+
+    CDefPolicy_Query = pattenMatch(base, rdata, b"Query", len(b"Query") - 1)
+    GetInstanceOfTSLicense = pattenMatch(base, rdata, b"InstanceOfLicense", len(b"InstanceOfLicense") - 1)
+    IsSingleSessionPerUserEnabled = pattenMatch(base, rdata, b"SingleSessionEnabled", len(b"SingleSessionEnabled") - 1)
+    IsSingleSessionPerUser = pattenMatch(base, rdata, b"IsSingleSessionPerUser", len(b"IsSingleSessionPerUser"))
+    
+    if ctypes.string_at(base + IsSingleSessionPerUser - 8, 8) == b"CUtils::":
+        IsSingleSessionPerUser -= 8
+    
+    IsLicenseTypeLocalOnly = pattenMatch(base, rdata, b"LocalOnly", len(b"LocalOnly") - 1)
+    bRemoteConnAllowed = pattenMatch(base, rdata, b"AllowRemote", len(b"AllowRemote"))
+
+    pImportDirectory = ctypes.POINTER(ctypes.c_uint32).from_address(base + pNT.contents.OptionalHeader.DataDirectory + 1)
+    pImportDescriptor = ctypes.POINTER(ctypes.c_uint32).from_address(base + pImportDirectory.contents.VirtualAddress)
+    pImportImage = findImportImage(pImportDescriptor, base, b"msvcrt.dll")
+    
+    if not pImportImage:
+        return -2
+
+    memset_addr = findImportFunction(pImportImage, base, b"memset")
+
