@@ -65,4 +65,17 @@ def searchXref(pe_file_path, function_rva, target_offset):
         
         index = section_data.find(lea_pattern, index + 1)
 
-    return 0  
+    return 0 
+
+def backtrace(base, func, pe):
+    while func.UnwindData & pefile.UNW_FLAG_CHAININFO:
+        if func.UnwindData & pefile.RUNTIME_FUNCTION_INDIRECT:
+            func = pe.get_runtime_function(base + (func.UnwindData & ~3))
+        else:
+            func = pe.get_runtime_function(base + func.UnwindData)
+        
+        unwind_info_rva = func.UnwindData
+        unwind_info = pe.get_struct('UNWIND_INFO', unwind_info_rva)
+    
+    return func
+ 
