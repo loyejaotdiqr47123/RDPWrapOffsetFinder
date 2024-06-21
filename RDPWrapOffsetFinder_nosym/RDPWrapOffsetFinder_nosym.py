@@ -1,4 +1,5 @@
 import pefile
+from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 
 Query = "CDefPolicy::Query"
 LocalOnly = "CSLQuery::IsTerminalTypeLocalOnly"
@@ -92,3 +93,87 @@ def findImportFunction(pe, dll_name, func_name):
                 if imp.name and imp.name.decode('utf-8').lower() == func_name.lower():
                     return imp.address
     return -1
+
+def local_only_patch(pe_path, rva, base, target):
+    pe = pefile.PE(pe_path)
+    
+    section = None
+    for sec in pe.sections:
+        if sec.contains_rva(rva):
+            section = sec
+            break
+    
+    if section is None:
+        print("ERROR: Section containing RVA not found")
+        return
+    
+    offset = rva - section.VirtualAddress
+    code = section.get_data(offset, 256)
+
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+    
+    IP = rva + base
+    target += base
+    
+    instructions = list(md.disasm(code, IP))
+    index = 0
+    
+    while index < len(instructions):
+        instr = instructions[index]
+        IP += instr.size
+        
+        if instr.mnemonic == "call":
+            op_str = instr.op_str.split()
+            if op_str[0].startswith("0x"):
+                call_target = int(op_str[0], 16)
+                if call_target == target:
+                    index += 1
+                    while index < len(instructions) and instructions[index].mnemonic == "mov":
+                        IP += instructions[index].size
+                        index += 1
+                    
+                    if index >= len(instructions) or instructions[index].mnemonic != "test":
+                        break
+                    
+                    IP += instructions[index].size
+                    index += 1
+                    
+                    if index >= len(instructions) or instructions[index].mnemonic not in ["jns", "js"]:
+                        break
+                    
+                    if instructions[index].mnemonic == "jns":
+                        IP += instructions[index].size
+                        index += 1
+                        if index >= len(instructions):
+                            break
+                        target = IP + int(instructions[index].op_str.split()[0], 16)
+                    else:
+                        IP += instructions[index].size
+                        index += 1
+                        if index >= len(instructions):
+                            break
+                        target = IP + int(instructions[index].op_str.split()[0], 16)
+                    
+                    if index >= len(instructions) or instructions[index].mnemonic != "cmp":
+                        break
+                    
+                    IP += instructions[index].size
+                    index += 1
+                    
+                    if index >= len(instructions) or instructions[index].mnemonic != "jz":
+                        break
+                    
+                    jmp_offset = int(instructions[index].op_str.split()[0], 16)
+                    if target != IP + jmp_offset:
+                        break
+                    
+                    jmp_type = "jmpshort"
+                    if len(instructions[index].bytes) == 2:
+                        jmp_type = "nopjmp"
+                    
+                    print(f"LocalOnlyPatch.x64=1\nLocalOnlyOffset.x64={IP - base:X}\nLocalOnlyCode.x64={jmp_type}")
+                    return
+        
+        index += 1
+    
+    print("ERROR: LocalOnlyPatch not found")
