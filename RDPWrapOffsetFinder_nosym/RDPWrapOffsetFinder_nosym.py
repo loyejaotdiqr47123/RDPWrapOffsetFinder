@@ -37,3 +37,32 @@ def pattern_match(pe, section_name, pattern):
             return section.VirtualAddress + i
 
     return -1
+
+def searchXref(pe_file_path, function_rva, target_offset):
+    pe = pefile.PE(pe_file_path)
+
+    for section in pe.sections:
+        if (section.Characteristics & 0x20000000):
+            section_start = section.VirtualAddress
+            section_end = section_start + section.SizeOfRawData
+            break
+    else:
+        raise ValueError("No executable section found in the PE file")
+
+    function_rva = function_rva - pe.OPTIONAL_HEADER.ImageBase
+
+    section_data = pe.get_memory_mapped_image()[section_start:section_end]
+
+    lea_pattern = b'\x48\x8d'
+
+    index = section_data.find(lea_pattern)
+    while index != -1:
+        displacement_offset = index + 3
+        displacement_value = int.from_bytes(section_data[displacement_offset:displacement_offset + 4], byteorder='little')
+        
+        if displacement_value + index + section_start == target_offset + section_start:
+            return index + section_start
+        
+        index = section_data.find(lea_pattern, index + 1)
+
+    return 0  
