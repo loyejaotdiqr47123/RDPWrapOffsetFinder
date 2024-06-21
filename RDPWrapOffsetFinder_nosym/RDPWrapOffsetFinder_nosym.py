@@ -1,6 +1,18 @@
 import pefile
 from capstone import *
 
+Query = "CDefPolicy::Query"
+LocalOnly = "CSLQuery::IsTerminalTypeLocalOnly"
+SingleSessionEnabled = "CSessionArbitrationHelper::IsSingleSessionPerUserEnabled"
+InstanceOfLicense = "CEnforcementCore::GetInstanceOfTSLicense "
+
+AllowRemote = "TerminalServices-RemoteConnectionManager-AllowRemoteConnections"
+AllowMultipleSessions = "TerminalServices-RemoteConnectionManager-AllowMultipleSessions"
+AllowAppServer = "TerminalServices-RemoteConnectionManager-AllowAppServerMode"
+AllowMultimon = "TerminalServices-RemoteConnectionManager-AllowMultimon"
+MaxUserSessions = "TerminalServices-RemoteConnectionManager-MaxUserSessions"
+MaxDebugSessions = "TerminalServices-RemoteConnectionManager-ce0ad219-4670-4988-98fb-89b14c2f072b-MaxSessions"
+
 def find_section_by_name(pe_file_path, section_name):
     # 将节名称转换为小写，以进行不区分区域设置的比较
     section_name = section_name.lower()
