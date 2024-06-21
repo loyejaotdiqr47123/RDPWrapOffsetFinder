@@ -78,4 +78,9 @@ def backtrace(base, func, pe):
         unwind_info = pe.get_struct('UNWIND_INFO', unwind_info_rva)
     
     return func
- 
+
+def findImportImage(pe, dll_name):
+    for entry in pe.DIRECTORY_ENTRY_IMPORT:
+        if entry.dll.decode().lower() == dll_name.lower():
+            return entry
+    return None
