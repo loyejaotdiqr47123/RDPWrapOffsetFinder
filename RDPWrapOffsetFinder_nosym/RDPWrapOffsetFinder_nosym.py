@@ -1,5 +1,5 @@
 import pefile
-from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+from capstone import *
 
 Query = "CDefPolicy::Query"
 LocalOnly = "CSLQuery::IsTerminalTypeLocalOnly"
@@ -177,3 +177,63 @@ def local_only_patch(pe_path, rva, base, target):
         index += 1
     
     print("ERROR: LocalOnlyPatch not found")
+
+def def_policy_patch(pe_path, rva, base):
+    pe = pefile.PE(pe_path)
+    section = pe.get_section_by_rva(rva)
+    if not section:
+        print("ERROR: Section not found")
+        return
+
+    file_offset = section.PointerToRawData + (rva - section.VirtualAddress)
+    code = pe.__data__[file_offset:file_offset + 128]
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+
+    ip = rva + base
+    mov_base = None
+    mov_target = None
+    last_length = 0
+
+    def check_and_print_result(reg1, reg2, is_jump):
+        print(f"DefPolicyPatch.x64=1\n"
+              f"DefPolicyOffset.x64={ip - base:016X}\n"
+              f"DefPolicyCode.x64=CDefPolicy_Query_{reg1}_{reg2}{'_jmp' if is_jump else ''}")
+
+    instructions = list(md.disasm(code, ip))
+    
+    for i, inst in enumerate(instructions):
+        if inst.mnemonic == "cmp":
+            op1, op2 = inst.operands
+            if op1.type == X86_OP_MEM and op1.mem.disp == 0x63c and op2.type == X86_OP_REG:
+                reg1 = inst.reg_name(op2.reg)
+                reg2 = inst.reg_name(op1.mem.base)
+                if i + 1 < len(instructions):
+                    next_inst = instructions[i + 1]
+                    if next_inst.mnemonic in ["jnz", "jz", "pop"]:
+                        check_and_print_result(reg1, reg2, next_inst.mnemonic == "jnz")
+                        return
+        elif not mov_base and inst.mnemonic == "mov":
+            op1, op2 = inst.operands
+            if op1.type == X86_OP_REG and op2.type == X86_OP_MEM and op2.mem.disp == 0x63c:
+                mov_base = op2.mem.base
+                mov_target = op1.reg
+        elif inst.mnemonic == "mov":
+            op1, op2 = inst.operands
+            if op1.type == X86_OP_REG and op2.type == X86_OP_MEM and op2.mem.base == mov_base and op2.mem.disp == 0x638:
+                mov_target2 = op1.reg
+                reg1 = inst.reg_name(mov_target2)
+                reg2 = inst.reg_name(op2.mem.base)
+                for j in range(i + 1, len(instructions)):
+                    cmp_inst = instructions[j]
+                    if cmp_inst.mnemonic == "cmp":
+                        cmp_op1, cmp_op2 = cmp_inst.operands
+                        if cmp_op1.type == X86_OP_REG and cmp_op2.type == X86_OP_REG:
+                            if (cmp_op1.reg == mov_target and cmp_op2.reg == mov_target2) or \
+                               (cmp_op1.reg == mov_target2 and cmp_op2.reg == mov_target):
+                                if j + 1 < len(instructions):
+                                    next_inst = instructions[j + 1]
+                                    if next_inst.mnemonic in ["jnz", "jz", "pop"]:
+                                        check_and_print_result(reg1, reg2, next_inst.mnemonic == "jnz")
+                                        return
+
+    print("ERROR: DefPolicyPatch not found")
