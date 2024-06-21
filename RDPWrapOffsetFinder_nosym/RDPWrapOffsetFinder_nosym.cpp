@@ -133,33 +133,51 @@ void LocalOnlyPatch(ZydisDecoder *decoder, DWORD64 RVA, DWORD64 base, DWORD64 ta
     auto IP = RVA + base;
     target += base;
 
-    while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void *)IP, length, &instruction, operands)))
+    // Lambda function for decoding instructions
+    // Lambda函数用于解码指令
+    auto decode_instruction = [&](void* addr, ZydisDecodedInstruction& instr, ZydisDecodedOperand* ops, ZyanUSize& len) -> bool {
+        return ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, addr, len, &instr, ops));
+    };
+
+    while (decode_instruction((void *)IP, instruction, operands, length))
     {
         IP += instruction.length;
         length -= instruction.length;
+
+        // Check for CALL instruction and validate operands
+        // 检查CALL指令并验证操作数
         if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL &&
             operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
             operands[0].imm.is_relative == ZYAN_TRUE &&
             operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
             operands[1].reg.value == ZYDIS_REGISTER_RIP &&
             target == IP + operands[0].imm.value.u)
-        {   
-            while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
+        {
+            // Skip MOV instructions
+            // 跳过MOV指令
+            while (decode_instruction((void*)IP, instruction, operands, length) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
                 IP += instruction.length;
                 length -= instruction.length;
             }
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, (ZydisDecoderContext*)0, (void*)IP, length, &instruction)) ||
-                instruction.mnemonic != ZYDIS_MNEMONIC_TEST) break;
+
+            // Ensure the next instruction is TEST
+            // 确保下一条指令是TEST
+            if (!decode_instruction((void*)IP, instruction, operands, length) || instruction.mnemonic != ZYDIS_MNEMONIC_TEST) break;
 
             IP += instruction.length;
             length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) ||
+
+            // Decode and validate next instruction
+            // 解码并验证下一条指令
+            if (!decode_instruction((void*)IP, instruction, operands, length) ||
                 instruction.operand_count != 3 ||
                 operands[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
                 operands[0].imm.is_relative != ZYAN_TRUE ||
                 operands[1].type != ZYDIS_OPERAND_TYPE_REGISTER ||
                 operands[1].reg.value != ZYDIS_REGISTER_RIP) break;
 
+            // Handle JNS and JS instructions
+            // 处理JNS和JS指令
             if (instruction.mnemonic == ZYDIS_MNEMONIC_JNS)
             {
                 target = IP + instruction.length;
@@ -173,12 +191,17 @@ void LocalOnlyPatch(ZydisDecoder *decoder, DWORD64 RVA, DWORD64 base, DWORD64 ta
             }
 
             length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, (ZydisDecoderContext*)0, (void*)IP, length, &instruction)) ||
-                instruction.mnemonic != ZYDIS_MNEMONIC_CMP) break;
+
+            // Ensure the next instruction is CMP
+            // 确保下一条指令是CMP
+            if (!decode_instruction((void*)IP, instruction, operands, length) || instruction.mnemonic != ZYDIS_MNEMONIC_CMP) break;
 
             IP += instruction.length;
             length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) ||
+
+            // Validate JZ instruction and operands
+            // 验证JZ指令和操作数
+            if (!decode_instruction((void*)IP, instruction, operands, length) ||
                 instruction.mnemonic != ZYDIS_MNEMONIC_JZ || instruction.operand_count != 3 ||
                 operands[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
                 operands[0].imm.is_relative != ZYAN_TRUE ||
@@ -186,14 +209,18 @@ void LocalOnlyPatch(ZydisDecoder *decoder, DWORD64 RVA, DWORD64 base, DWORD64 ta
                 operands[1].reg.value != ZYDIS_REGISTER_RIP ||
                 target != IP + operands[0].imm.value.u + instruction.length) break;
 
-            const char* jmp = "jmpshort";
-            if (instruction.raw.imm[0].offset == 2) jmp = "nopjmp";
+            const char* jmp = (instruction.raw.imm[0].offset == 2) ? "nopjmp" : "jmpshort";
+
+            // Output the patch information
+            // 输出补丁信息
             printf("LocalOnlyPatch.x64=1\n"
-                "LocalOnlyOffset.x64=%llX\n"
-                "LocalOnlyCode.x64=%s\n", IP - base, jmp);
+                   "LocalOnlyOffset.x64=%llX\n"
+                   "LocalOnlyCode.x64=%s\n", IP - base, jmp);
             return;
         }
     }
+    // If the patch is not found, print an error message
+    // 如果未找到补丁，打印错误信息
     puts("ERROR: LocalOnlyPatch not found");
 }
 
