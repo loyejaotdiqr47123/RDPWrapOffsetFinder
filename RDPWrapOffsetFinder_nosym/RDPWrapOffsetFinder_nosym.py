@@ -10,6 +10,6 @@ def find_section_by_name(pe_file_path, section_name):
     for section in pe.sections:
         # 将节的名称转换为小写进行比较
         if section.Name.decode().rstrip('\x00').lower() == section_name:
-            return section  # 返回指向该节头的指针（
+            return section  # 返回指向该节头的指针（即section对象）
     
     return None
