@@ -23,7 +23,7 @@ typedef struct {
     VS_FIXEDFILEINFO Value;
     WORD             Padding2;
     WORD             Children;
-} VS_VERSIONINFO, *PVS_VERSIONINFO;
+} VS_VERSIONINFO, * PVS_VERSIONINFO;
 
 typedef union _UNWIND_CODE {
     struct {
@@ -60,7 +60,7 @@ PIMAGE_SECTION_HEADER findSection(PIMAGE_NT_HEADERS64 pNT, const char* str)
     return NULL;
 }
 
-DWORD64 pattenMatch(DWORD64 base, PIMAGE_SECTION_HEADER pSection, const void *str, DWORD64 size)
+DWORD64 pattenMatch(DWORD64 base, PIMAGE_SECTION_HEADER pSection, const void* str, DWORD64 size)
 {
     auto rdata = base + pSection->VirtualAddress;
 
@@ -109,8 +109,8 @@ PRUNTIME_FUNCTION backtrace(DWORD64 base, PRUNTIME_FUNCTION func) {
 PIMAGE_IMPORT_DESCRIPTOR findImportImage(PIMAGE_IMPORT_DESCRIPTOR pImportDescriptor, DWORD64 base, LPCSTR str) {
     while (pImportDescriptor->Name)
     {
-        if(!lstrcmpiA((LPCSTR)(base + pImportDescriptor->Name), str)) return pImportDescriptor;
-        pImportDescriptor++; 
+        if (!lstrcmpiA((LPCSTR)(base + pImportDescriptor->Name), str)) return pImportDescriptor;
+        pImportDescriptor++;
     }
     return NULL;
 }
@@ -126,59 +126,59 @@ DWORD64 findImportFunction(PIMAGE_IMPORT_DESCRIPTOR pImportDescriptor, DWORD64 b
     return -1;
 }
 
-void LocalOnlyPatch(ZydisDecoder *decoder, DWORD64 RVA, DWORD64 base, DWORD64 target) {
+void LocalOnlyPatch(ZydisDecoder* decoder, DWORD64 RVA, DWORD64 base, DWORD64 target) {
     ZyanUSize length = 256;
     ZydisDecodedInstruction instruction;
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    auto IP = RVA + base;
+    uint64_t IP = RVA + base;
     target += base;
 
-    while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void *)IP, length, &instruction, operands)))
-    {
+    auto decode_instruction = [&](uint64_t& IP, ZyanUSize& length) {
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands))) {
+            return false;
+        }
         IP += instruction.length;
         length -= instruction.length;
+        return true;
+        };
+
+    while (decode_instruction(IP, length)) {
         if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL &&
             operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
             operands[0].imm.is_relative == ZYAN_TRUE &&
             operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
             operands[1].reg.value == ZYDIS_REGISTER_RIP &&
-            target == IP + operands[0].imm.value.u)
-        {   
-            while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
-                IP += instruction.length;
-                length -= instruction.length;
+            target == IP + operands[0].imm.value.u) {
+
+            while (decode_instruction(IP, length) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
+                // No operation, just advancing IP
             }
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, (ZydisDecoderContext*)0, (void*)IP, length, &instruction)) ||
+
+            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, nullptr, (void*)IP, length, &instruction)) ||
                 instruction.mnemonic != ZYDIS_MNEMONIC_TEST) break;
 
-            IP += instruction.length;
-            length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) ||
+            if (!decode_instruction(IP, length) ||
                 instruction.operand_count != 3 ||
                 operands[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
                 operands[0].imm.is_relative != ZYAN_TRUE ||
                 operands[1].type != ZYDIS_OPERAND_TYPE_REGISTER ||
                 operands[1].reg.value != ZYDIS_REGISTER_RIP) break;
 
-            if (instruction.mnemonic == ZYDIS_MNEMONIC_JNS)
-            {
+            if (instruction.mnemonic == ZYDIS_MNEMONIC_JNS) {
                 target = IP + instruction.length;
                 IP = target + operands[0].imm.value.u;
             }
             else if (instruction.mnemonic != ZYDIS_MNEMONIC_JS) break;
-            else
-            {
+            else {
                 IP += instruction.length;
                 target = IP + operands[0].imm.value.u;
             }
 
             length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, (ZydisDecoderContext*)0, (void*)IP, length, &instruction)) ||
+            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(decoder, nullptr, (void*)IP, length, &instruction)) ||
                 instruction.mnemonic != ZYDIS_MNEMONIC_CMP) break;
 
-            IP += instruction.length;
-            length -= instruction.length;
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(decoder, (void*)IP, length, &instruction, operands)) ||
+            if (!decode_instruction(IP, length) ||
                 instruction.mnemonic != ZYDIS_MNEMONIC_JZ || instruction.operand_count != 3 ||
                 operands[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
                 operands[0].imm.is_relative != ZYAN_TRUE ||
@@ -196,6 +196,7 @@ void LocalOnlyPatch(ZydisDecoder *decoder, DWORD64 RVA, DWORD64 base, DWORD64 ta
     }
     puts("ERROR: LocalOnlyPatch not found");
 }
+
 
 void DefPolicyPatch(ZydisDecoder* decoder, DWORD64 RVA, DWORD64 base) {
     ZyanUSize length = 128;
@@ -358,7 +359,7 @@ int main(int argc, char** argv)
     auto pNT = (PIMAGE_NT_HEADERS64)(base + pDos->e_lfanew);
     auto rdata = findSection(pNT, ".rdata");
     if (!rdata) rdata = findSection(pNT, ".text");
-    
+
     auto CDefPolicy_Query = pattenMatch(base, rdata, Query, sizeof(Query) - 1);
     auto GetInstanceOfTSLicense = pattenMatch(base, rdata, InstanceOfLicense, sizeof(InstanceOfLicense) - 1);
     auto IsSingleSessionPerUserEnabled = pattenMatch(base, rdata, SingleSessionEnabled, sizeof(SingleSessionEnabled) - 1);
@@ -372,12 +373,12 @@ int main(int argc, char** argv)
     auto pImportImage = findImportImage(pImportDescriptor, base, "msvcrt.dll");
     if (!pImportImage) return -2;
     auto memset_addr = findImportFunction(pImportImage, base, "memset");
-    
+
     DWORD64 VerifyVersion_addr = -1;
     pImportImage = findImportImage(pImportDescriptor, base, "api-ms-win-core-kernel32-legacy-l1-1-1.dll");
     if (!pImportImage) pImportImage = findImportImage(pImportDescriptor, base, "KERNEL32.dll");
     if (pImportImage) VerifyVersion_addr = findImportFunction(pImportImage, base, "VerifyVersionInfoW");
-    
+
     auto pExceptionDirectory = pNT->OptionalHeader.DataDirectory + IMAGE_DIRECTORY_ENTRY_EXCEPTION;
     auto FunctionTable = (PRUNTIME_FUNCTION)(base + pExceptionDirectory->VirtualAddress);
     auto FunctionTableSize = pExceptionDirectory->Size / (DWORD)sizeof(RUNTIME_FUNCTION);
@@ -420,7 +421,7 @@ int main(int argc, char** argv)
         if (IsSingleSessionPerUserEnabled_addr &&
             SingleUserPatch(&decoder, IsSingleSessionPerUserEnabled_addr, base, memset_addr, VerifyVersion_addr));
         else if (IsSingleSessionPerUser_addr)
-            if(!SingleUserPatch(&decoder, IsSingleSessionPerUser_addr, base, memset_addr, VerifyVersion_addr))
+            if (!SingleUserPatch(&decoder, IsSingleSessionPerUser_addr, base, memset_addr, VerifyVersion_addr))
                 puts("ERROR: SingleUserPatch not found");
     }
 
@@ -457,7 +458,7 @@ int main(int argc, char** argv)
                     "SLPolicyOffset.x64=%llX\n"
                     "SLPolicyFunc.x64=New_Win8SL\n", IP + operands[0].imm.value.u - base);
                 return 0;
-            } 
+            }
         }
 
         puts("ERROR: SLGetWindowsInformationDWORDWrapper not found");
@@ -469,7 +470,8 @@ int main(int argc, char** argv)
         if (IsLicenseTypeLocalOnly_addr)
             LocalOnlyPatch(&decoder, GetInstanceOfTSLicense_addr, base, IsLicenseTypeLocalOnly_addr);
         else puts("ERROR: IsLicenseTypeLocalOnly not found");
-    } else puts("ERROR: GetInstanceOfTSLicense not found");
+    }
+    else puts("ERROR: GetInstanceOfTSLicense not found");
 
     printf("SLInitHook.x64=1\n"
         "SLInitOffset.x64=%lX\n"
@@ -483,7 +485,7 @@ int main(int argc, char** argv)
     auto bMultimonAllowed = pattenMatch(base, rdata, AllowMultimon, sizeof(AllowMultimon));
     auto lMaxUserSessions = pattenMatch(base, rdata, MaxUserSessions, sizeof(MaxUserSessions));
     auto ulMaxDebugSessions = pattenMatch(base, rdata, MaxDebugSessions, sizeof(MaxDebugSessions));
-        
+
     DWORD64 bServerSku_addr = 0, bRemoteConnAllowed_addr = 0, bFUSEnabled_addr = 0, bAppServerAllowed_addr = 0,
         bMultimonAllowed_addr = 0, lMaxUserSessions_addr = 0, ulMaxDebugSessions_addr = 0, bInitialized_addr = 0;
     auto current = &bServerSku_addr;
