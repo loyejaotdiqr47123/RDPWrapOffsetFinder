@@ -237,3 +237,52 @@ def def_policy_patch(pe_path, rva, base):
                                         return
 
     print("ERROR: DefPolicyPatch not found")
+
+def single_user_patch(pe_path, rva, base, target, target2):
+    pe = pefile.PE(pe_path)
+    
+    code_section = next((s for s in pe.sections if b'.text' in s.Name), None)
+    if not code_section:
+        print("Code section not found!")
+        return 0
+
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+    
+    code_base = pe.OPTIONAL_HEADER.ImageBase + code_section.VirtualAddress
+    rva += base
+    target += base
+    target2 += base
+    
+    code = code_section.get_data()
+    instructions = list(md.disasm(code, code_base))
+
+    length = 256
+    IP = rva
+    for instr in instructions:
+        if IP + instr.size > rva + length:
+            break
+
+        if instr.mnemonic == 'call' and len(instr.operands) == 1:
+            op = instr.operands[0]
+            if op.type == X86_OP_IMM and op.imm + instr.address == target:
+                jmp_addr = instr.address + instr.size + op.imm
+                for jmp_instr in md.disasm(code, jmp_addr):
+                    if jmp_instr.mnemonic == 'jmp' and len(jmp_instr.operands) == 1:
+                        jmp_op = jmp_instr.operands[0]
+                        if jmp_op.type == X86_OP_MEM and jmp_op.mem.disp + jmp_addr + jmp_instr.size == target:
+                            for follow_instr in md.disasm(code, instr.address):
+                                if follow_instr.mnemonic == 'call' and 5 <= follow_instr.size <= 7:
+                                    follow_op = follow_instr.operands[0]
+                                    if follow_op.type == X86_OP_MEM and follow_op.mem.disp + follow_instr.address + follow_instr.size == target2:
+                                        print(f"SingleUserPatch.x64=1\nSingleUserOffset.x64={follow_instr.address - base:X}\nSingleUserCode.x64=mov_eax_1_nop_{follow_instr.size - 5}")
+                                        return 1
+                                elif follow_instr.mnemonic == 'cmp' and follow_instr.size <= 8:
+                                    follow_op0 = follow_instr.operands[0]
+                                    follow_op1 = follow_instr.operands[1]
+                                    if follow_op0.type == X86_OP_MEM and (follow_op0.mem.base == X86_REG_RBP or follow_op0.mem.base == X86_REG_RSP):
+                                        if (follow_op1.type == X86_OP_IMM and follow_op1.imm == 1) or follow_op1.type == X86_OP_REG:
+                                            print(f"SingleUserPatch.x64=1\nSingleUserOffset.x64={follow_instr.address - base:X}\nSingleUserCode.x64=nop_{follow_instr.size}")
+                                            return 1
+                            break
+        IP += instr.size
+    return 0
