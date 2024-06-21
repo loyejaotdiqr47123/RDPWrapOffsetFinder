@@ -84,3 +84,11 @@ def findImportImage(pe, dll_name):
         if entry.dll.decode().lower() == dll_name.lower():
             return entry
     return None
+
+def findImportFunction(pe, dll_name, func_name):
+    for entry in pe.DIRECTORY_ENTRY_IMPORT:
+        if entry.dll.decode('utf-8').lower() == dll_name.lower():
+            for imp in entry.imports:
+                if imp.name and imp.name.decode('utf-8').lower() == func_name.lower():
+                    return imp.address
+    return -1
